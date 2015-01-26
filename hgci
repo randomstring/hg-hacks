@@ -1,0 +1,80 @@
+#!/usr/bin/perl
+#
+# hgci - just how safe can we make "hg commit"
+#
+# written by dole for dole, but I present this as a useful example for others.
+#
+# Usage:
+#    hgci  "commit message"
+#
+# CAVEAT: Unlike other hg commands, the default is to only commit changes in the
+#         current working directly. This will
+#
+# User dole uses this in conjunction with hg hooks.
+#
+
+use strict;
+use Time::HiRes;
+
+my $me = "dole";
+
+die("must be run as user $me (if this isn't you, edit this script)") if ($ENV{"USER"} ne $me);
+
+my $msg = shift;
+my $dir = shift || '.';
+my $diff_dir =  $ENV{HOME} . "/hg_diffs";
+
+if (! -d $diff_dir)
+{
+    mkdir($diff_dir) || die("cannot create dir [$diff_dir] $!");
+}
+
+# generate temp file to save our diffs.
+my $tmp = `pwd`;
+chomp($tmp);
+$tmp =~ s,^.+?/b/,,;
+$tmp .= $dir if ($dir ne '.');
+$tmp =~ s,/,_,g;
+$tmp =~ s,\s,+,g;
+my $now = Time::HiRes::time();
+my $diff_file = $diff_dir . "/${now}=${tmp}.diff";
+my $msg_file  = $diff_dir . "/${now}=${tmp}.msg";
+
+die("no message specified") if ($msg eq '');
+die("$dir is not a valid directory $?") if (! -d "$dir");
+
+# write the commit message to a file to avoid problems with command line escaping
+# as a bonus we save our commit message
+open(my $fh, '>', $msg_file) || die ("cannot open temp message file [$msg_file] $!");
+print $fh $msg;
+close($fh);
+
+# get the latest, to avoid merging
+print `hg pull` || die("can't pull latest");
+print `hg update` || die("can't update");
+
+# save our current diffs, just in case things get really messed up
+print "saving diffs to [$diff_file]\n";
+print "==== DIFF for directory [$dir] ====\n";
+print `hg diff $dir > $diff_file`;
+
+# Show the user exactly what they are about to check in
+print `cat $diff_file`;
+print "========\n";
+print "==== hg status for directory [$dir] ====\n";
+print `hg status $dir`;
+print "========\n";
+print "PROCEED? [Y/n]\n";
+
+# Go for it!
+my $input = <>;
+die("QUITING without commiting/pushing\n") if ($input !~ /^y/i);
+print `hg pull && hg update` || die("can't pull and update latest, quiting before commit.");
+print `build` || die("build failed, quiting before commit.");
+print `hg pull && hg update` || die("can't pull and update latest, quiting before commit. (second time)");
+my $cmd = "hg commit -l $msg_file $dir";
+print "running command [$cmd]\n";
+print `$cmd` || die("hg commit failed, quiting.");
+print `hg push` || die("hg push failed, you better sort this shit out AND QUICK!\n(hg rollback is your best bet. Do NOT hg pull or update right now.)");
+print "done.\n";
+
